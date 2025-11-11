@@ -1,0 +1,31 @@
+name: 'PixelFrame Coding Agent'
+description: 'Runs the PixelFrame agent, pushes code, and opens/updates a PR.'
+author: 'PixelFrame'
+inputs:
+  payload-file:
+    description: 'Path to JSON payload supplied by PixelFrame.'
+    required: true
+  token:
+    description: 'GitHub token with repo write permissions.'
+    default: ${{ github.token }}
+  merge-strategy:
+    description: 'Fallback merge strategy (squash|merge|rebase).'
+    required: false
+  agent-provider:
+    description: 'Override provider identifier.'
+    required: false
+  pixelframe-base-url:
+    description: 'Override PixelFrame API base URL.'
+    required: false
+outputs:
+  run-id:
+    description: 'Identifier for the PixelFrame agent run.'
+  status:
+    description: 'Status returned by the PixelFrame agent.'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+branding:
+  color: 'blue'
+  icon: 'git-pull-request'
+
