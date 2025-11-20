@@ -4,7 +4,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const ACTION_VERSION = '1.0.0';
+const ACTION_VERSION = '2.0.0';
 
 function formatInputKey(name) {
   return `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
@@ -118,6 +118,70 @@ function resolveAgentUrl(payload, inputBaseUrl) {
   }
 }
 
+async function pollAgentStatus(baseUrl, apiKey, runId) {
+  const statusUrl = new URL(`/agent/status/${runId}`, baseUrl).toString();
+  const maxAttempts = 120; // 10 minutes (5s * 120)
+  const pollInterval = 5000; // 5 seconds
+  
+  toNotice(`Job ${runId} started, polling for completion (max 10 minutes)...`);
+  
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    
+    const headers = {
+      'User-Agent': `pixelframe-agent-action/${ACTION_VERSION}`,
+    };
+    if (apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
+    
+    toDebug(`Polling attempt ${attempt + 1}/${maxAttempts} - ${statusUrl}`);
+    
+    const response = await fetch(statusUrl, { method: 'GET', headers });
+    const raw = await response.text();
+    
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (error) {
+      toWarning(`Status response is not valid JSON: ${error.message}`);
+      continue;
+    }
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(`Job ${runId} not found (404)`);
+      }
+      if (response.status === 410) {
+        throw new Error(`Job ${runId} expired (410)`);
+      }
+      throw new Error(`Status check failed (${response.status}): ${raw.slice(0, 200)}`);
+    }
+    
+    if (data.status === 'completed') {
+      const elapsed = Math.round(((attempt + 1) * pollInterval) / 1000);
+      toNotice(`Job ${runId} completed after ${elapsed}s`);
+      return data;
+    }
+    
+    if (data.status === 'failed') {
+      toWarning(`Job ${runId} failed: ${data.error || 'Unknown error'}`);
+      // Return the fallback result if available
+      return data.result || data;
+    }
+    
+    if (data.status === 'processing') {
+      const elapsed = data.elapsed_seconds || ((attempt + 1) * 5);
+      toDebug(`Still processing... (${elapsed}s elapsed)`);
+      continue;
+    }
+    
+    toWarning(`Unknown status: ${data.status}`);
+  }
+  
+  throw new Error(`Job ${runId} timed out after 10 minutes`);
+}
+
 async function callAgent(agentUrl, apiKey, payload, context, metadata) {
   const headers = {
     'Content-Type': 'application/json',
@@ -158,6 +222,12 @@ async function callAgent(agentUrl, apiKey, payload, context, metadata) {
     throw new Error(
       `PixelFrame API request failed (${response.status} ${response.statusText}): ${snippet}`
     );
+  }
+
+  // NEW: If status is "processing", poll until complete
+  if (data && data.status === 'processing' && data.runId) {
+    const baseUrl = new URL(agentUrl).origin;
+    data = await pollAgentStatus(baseUrl, apiKey, data.runId);
   }
 
   return data;
