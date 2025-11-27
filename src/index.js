@@ -4,16 +4,18 @@ const fs = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const ACTION_VERSION = '2.1.0';
+const ACTION_VERSION = '2.3.0';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MULTI-AGENT PIPELINE CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 const PIPELINE_CONFIG = {
   agents: {
-    ticket: { name: 'Agent 1: Ticket Analysis', model: 'Grok-4' },
-    coder: { name: 'Agent 2: Code Generation', model: 'Opus 4.5' },
-    reviewer: { name: 'Agent 3: Verification', model: 'Codex' },
+    // Ticket analysis ran during spec creation (separate session) - shown for context only
+    ticket: { name: 'Spec Validated', model: 'Grok-4', static: true },
+    // Active PR generation agents (2-agent pipeline)
+    coder: { name: 'Agent 1: Code Generation', model: 'Opus 4.5' },
+    reviewer: { name: 'Agent 2: Verification', model: 'Codex' },
   },
   // Status messages for each agent stage
   messages: {
@@ -139,12 +141,12 @@ function logAgentStatus(agentKey, status, details = {}) {
  */
 function logPipelineStart() {
   toNotice('═══════════════════════════════════════════════════════════');
-  toNotice('  PIXELFRAME MULTI-AGENT PIPELINE');
+  toNotice('  PIXELFRAME 2-AGENT PR PIPELINE');
   toNotice('═══════════════════════════════════════════════════════════');
   toNotice('');
   
-  // Agent 1 (Ticket) is always already done
-  logAgentStatus('ticket', 'completed', { message: 'Ticket requirements analyzed' });
+  // Spec validation ran during spec creation (separate session) - show as context
+  logAgentStatus('ticket', 'completed', { message: 'Using validated specification' });
 }
 
 /**
@@ -776,4 +778,5 @@ async function run() {
 }
 
 run();
+
 

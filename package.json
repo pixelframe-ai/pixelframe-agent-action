@@ -1,6 +1,6 @@
 {
   "name": "pixelframe-agent-action",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "GitHub Action that runs the PixelFrame coding agent, pushes changes, and manages pull requests.",
   "main": "dist/index.js",
   "type": "commonjs",
