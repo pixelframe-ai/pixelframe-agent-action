@@ -4,7 +4,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const ACTION_VERSION = '2.3.0';
+const ACTION_VERSION = '2.4.0';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MULTI-AGENT PIPELINE CONFIGURATION
@@ -14,8 +14,8 @@ const PIPELINE_CONFIG = {
     // Ticket analysis ran during spec creation (separate session) - shown for context only
     ticket: { name: 'Spec Validated', model: 'Grok-4', static: true },
     // Active PR generation agents (2-agent pipeline)
-    coder: { name: 'Agent 1: Code Generation', model: 'Opus 4.5' },
-    reviewer: { name: 'Agent 2: Verification', model: 'Codex' },
+    coder: { name: 'Agent 1: Code Generation', model: 'Opus 4.6' },
+    reviewer: { name: 'Agent 2: Verification', model: 'Claude' },
   },
   // Status messages for each agent stage
   messages: {
@@ -455,6 +455,78 @@ async function applyFileOperations(plan) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ASSET DOWNLOADING (Phase 4e)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MAX_ASSET_RETRIES = 3;
+
+async function downloadSingleVariant(url, targetPath, variantKey, assetName) {
+  const filePath = path.resolve(process.cwd(), targetPath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+
+  for (let attempt = 1; attempt <= MAX_ASSET_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length === 0) {
+        throw new Error('Empty response body');
+      }
+      await fs.writeFile(filePath, buffer);
+      toDebug(`  [OK] ${assetName}/${variantKey} -> ${targetPath} (${buffer.length} bytes)`);
+      return true;
+    } catch (err) {
+      toDebug(`  [RETRY] ${assetName}/${variantKey} attempt ${attempt}/${MAX_ASSET_RETRIES}: ${err.message}`);
+      if (attempt < MAX_ASSET_RETRIES) {
+        await new Promise((r) => setTimeout(r, attempt * 1000));
+      }
+    }
+  }
+  return false;
+}
+
+async function downloadAssets(plan) {
+  const assets = Array.isArray(plan.assets) ? plan.assets : [];
+  if (assets.length === 0) {
+    return;
+  }
+
+  toNotice(`🖼️  Downloading ${assets.length} asset(s) from R2...`);
+
+  let downloaded = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const asset of assets) {
+    const name = asset.name || 'unknown';
+    const targetPaths = asset.target_paths || {};
+    const downloadUrls = asset.download_urls || {};
+
+    for (const variantKey of Object.keys(targetPaths)) {
+      const targetPath = targetPaths[variantKey];
+      const downloadUrl = downloadUrls[variantKey];
+
+      if (!targetPath || !downloadUrl) {
+        skipped++;
+        continue;
+      }
+
+      const ok = await downloadSingleVariant(downloadUrl, targetPath, variantKey, name);
+      if (ok) {
+        downloaded++;
+      } else {
+        toWarning(`  [FAIL] ${name}/${variantKey} — all ${MAX_ASSET_RETRIES} attempts failed`);
+        failed++;
+      }
+    }
+  }
+
+  toNotice(`🖼️  Assets: ${downloaded} downloaded, ${failed} failed, ${skipped} skipped`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // GIT OPERATIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -673,6 +745,7 @@ async function maybeApplyRepositoryPlan(plan, token, mergeStrategy) {
   await ensureGitUserConfigured(commit.author);
   await prepareBranch(branchName, commit.base || plan.baseBranch);
   await applyFileOperations(plan);
+  await downloadAssets(plan);
 
   const committed = await stageAndCommit(commit.message || plan.commitMessage || 'PixelFrame agent updates');
   if (!committed) {
@@ -714,7 +787,7 @@ async function run() {
     const pixelframeBaseUrl = getInput('pixelframe-base-url');
 
     // NOTE: agent-provider input removed - pipeline is now fixed
-    // (Grok-4 for tickets, Opus 4.5 for code, Codex for verification)
+    // (Grok-4 for tickets, Opus 4.6 for code, Claude for verification)
 
     const payloadPath = path.resolve(process.cwd(), payloadFile);
     const payloadRaw = await fs.readFile(payloadPath, 'utf-8');
@@ -778,5 +851,3 @@ async function run() {
 }
 
 run();
-
-
